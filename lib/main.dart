@@ -10,7 +10,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return new MaterialApp(
-        title: 'Employee\'s Corner',
+        title: 'Video Recorder App',
         debugShowCheckedModeBanner: false,
         theme: new ThemeData(
           primarySwatch: Colors.blue,

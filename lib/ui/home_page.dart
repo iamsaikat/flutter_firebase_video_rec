@@ -4,13 +4,13 @@ import 'package:video_rec/auth/authentication.dart';
 
 import 'dart:async';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
-import 'package:video_rec/ui/video_player.dart';
-import 'test.dart';
-
+import 'package:video_rec/ui/video_play_pause.dart';
+import 'package:flutter_ffmpeg/flutter_ffmpeg.dart';
 
 
 
@@ -19,6 +19,7 @@ class HomePage extends StatefulWidget {
   final BaseAuth auth;
   final String userId ;
   final VoidCallback onSignedOut;
+
 
   HomePage({Key key, this.auth, this.userId, this.onSignedOut}) : super(key: key);
 
@@ -52,6 +53,7 @@ class _HomePageState extends State<HomePage> {
   List<CameraDescription> cameras;
   CameraController controller;
   bool _isReady = false;
+  final FlutterFFmpeg _flutterFFmpeg = new FlutterFFmpeg();
 
   @override
   void initState() {
@@ -74,6 +76,18 @@ class _HomePageState extends State<HomePage> {
       _isReady = true;
     });
   }
+
+  Future<dynamic> downloadFile(String url) async {
+//    String dir = (await getApplicationDocumentsDirectory()).path;
+    final Directory extDir = await getApplicationDocumentsDirectory();
+    final String dirPath = '${extDir.path}/Videos/flutter_test';
+    File file = new File('$dirPath/watermark.png');
+    var request = await http.get(url,);
+    var bytes = await request.bodyBytes;//close();
+    await file.writeAsBytes(bytes);
+    print(file.path);
+  }
+
 
 
   String imagePath;
@@ -133,7 +147,7 @@ class _HomePageState extends State<HomePage> {
               mainAxisAlignment: MainAxisAlignment.start,
               children: <Widget>[
                 _cameraTogglesRowWidget(),
-                _thumbnailWidget(),
+//                _thumbnailWidget(),
               ],
             ),
           ),
@@ -157,37 +171,11 @@ class _HomePageState extends State<HomePage> {
         return AspectRatio(
           aspectRatio: controller.value.aspectRatio,
           child: CameraPreview(controller),
+
         );
       }
     }
 
-    /// Display the thumbnail of the captured image or video.
-    Widget _thumbnailWidget() {
-      return Expanded(
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: videoController == null && imagePath == null
-              ? null
-              : SizedBox(
-            child: (videoController == null)
-                ? Image.file(File(imagePath))
-                : Container(
-              child: Center(
-                child: AspectRatio(
-                    aspectRatio: videoController.value.size != null
-                        ? videoController.value.aspectRatio
-                        : 1.0,
-                    child: VideoPlayer(videoController)),
-              ),
-              decoration: BoxDecoration(
-                  border: Border.all(color: Colors.pink)),
-            ),
-            width: 64.0,
-            height: 64.0,
-          ),
-        ),
-      );
-    }
 
     /// Display the control bar with buttons to take pictures and record videos.
     Widget _captureControlRowWidget() {
@@ -195,15 +183,6 @@ class _HomePageState extends State<HomePage> {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         mainAxisSize: MainAxisSize.max,
         children: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.camera_alt),
-            color: Colors.blue,
-            onPressed: controller != null &&
-                controller.value.isInitialized &&
-                !controller.value.isRecordingVideo
-                ? onTakePictureButtonPressed
-                : null,
-          ),
           IconButton(
             icon: const Icon(Icons.videocam),
             color: Colors.blue,
@@ -285,18 +264,6 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
-    void onTakePictureButtonPressed() {
-      takePicture().then((String filePath) {
-        if (mounted) {
-          setState(() {
-            imagePath = filePath;
-            videoController?.dispose();
-            videoController = null;
-          });
-          if (filePath != null) showInSnackBar('Picture saved to $filePath');
-        }
-      });
-    }
 
     void onVideoRecordButtonPressed() {
       startVideoRecording().then((String filePath) {
@@ -305,16 +272,10 @@ class _HomePageState extends State<HomePage> {
       });
     }
 
-    void onStopButtonPressed() {
+    void  onStopButtonPressed() {
       stopVideoRecording().then((_) {
         if (mounted) setState(() {});
         showInSnackBar('Video recorded to: $videoPath');
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => VideoPlayerContainer(videoPath: videoPath),
-          ),
-        );
       });
     }
 
@@ -356,17 +317,30 @@ class _HomePageState extends State<HomePage> {
         return null;
       }
 
-      await _startVideoPlayer();
+      String imgurl = 'https://i.imgur.com/FRZUyS2.png';
+      await downloadFile(imgurl);
+      final Directory extDir = await getApplicationDocumentsDirectory();
+      final String dirPath = '${extDir.path}/Videos/flutter_test';
+      await Directory(dirPath).create(recursive: true);
+      final String filePath = '$dirPath/${timestamp()}.mp4';
+      final String watermarkImagePath = '$dirPath/watermark.png';
 
-      return new VideoPlayerContainer (
-        videoPath: videoPath
-      );
+
+     var complexCommand = ["-y" ,"-i", videoPath,"-strict","experimental", "-vf", "movie=$watermarkImagePath [watermark]; [in][watermark] overlay=main_w-overlay_w-10:10 [out]","-s", "320x240","-r", "30", "-b", "15496k", "-vcodec", "mpeg4","-ab", "48000", "-ac", "2", "-ar", "22050", filePath];
+      await _flutterFFmpeg.executeWithArguments(complexCommand).then((rc) {
+        print("FFmpeg process exited with rc $rc");
+        videoPath = filePath;
+      });
+
+
+      await _startVideoPlayer();
 
     }
 
 
 
     Future<void> _startVideoPlayer() async {
+      print('Video recorded to: $videoPath');
       final VideoPlayerController vcontroller =
       VideoPlayerController.file(File(videoPath));
       videoPlayerListener = () {
@@ -377,7 +351,7 @@ class _HomePageState extends State<HomePage> {
         }
       };
       vcontroller.addListener(videoPlayerListener);
-      await vcontroller.setLooping(true);
+      await vcontroller.setLooping(false);
       await vcontroller.initialize();
       await videoController?.dispose();
       if (mounted) {
@@ -387,31 +361,14 @@ class _HomePageState extends State<HomePage> {
         });
       }
       await vcontroller.play();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>  VideoPlayPause(vcontroller),
+        ),
+      );
     }
 
-    Future<String> takePicture() async {
-      if (!controller.value.isInitialized) {
-        showInSnackBar('Error: select a camera first.');
-        return null;
-      }
-      final Directory extDir = await getApplicationDocumentsDirectory();
-      final String dirPath = '${extDir.path}/Pictures/flutter_test';
-      await Directory(dirPath).create(recursive: true);
-      final String filePath = '$dirPath/${timestamp()}.jpg';
-
-      if (controller.value.isTakingPicture) {
-        // A capture is already pending, do nothing.
-        return null;
-      }
-
-      try {
-        await controller.takePicture(filePath);
-      } on CameraException catch (e) {
-        _showCameraException(e);
-        return null;
-      }
-      return filePath;
-    }
 
     void _showCameraException(CameraException e) {
       logError(e.code, e.description);
